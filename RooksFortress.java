@@ -1,3 +1,4 @@
+
 package com.chesssmp.weapons;
 
 import com.chesssmp.ChessSMP;
