@@ -33,6 +33,10 @@ public final class WorldListener implements Listener {
             plugin.messages().send(p, "no-permission");
             return;
         }
+        if (!plugin.getConfig().getBoolean("meteor.shop.enabled", true)) {
+            plugin.messages().send(p, "shop-closed");
+            return;
+        }
         new ShopMenu(plugin, p).open();
     }
 

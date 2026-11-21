@@ -33,6 +33,7 @@ public final class DataStore {
     private final File file;
     private final Map<UUID, PlayerData> players = new HashMap<>();
     private boolean dirty;
+    private final java.util.Set<UUID> assigned = new java.util.HashSet<>();
     private final Object ioLock = new Object();
     private final AtomicLong sequence = new AtomicLong();
     private long lastWritten;
@@ -86,11 +87,24 @@ public final class DataStore {
     public PlayerData of(Player player) {
         PlayerData d = of(player.getUniqueId(), player.getName());
         if (d.piece() == null) {
-            PieceType def = PieceType.parse(plugin.getConfig().getString("default-piece", "PAWN"));
-            d.setPiece(def == null ? PieceType.PAWN : def);
+            String raw = plugin.getConfig().getString("default-piece", "RANDOM");
+            if ("RANDOM".equalsIgnoreCase(raw)) {
+                PieceType[] all = PieceType.values();
+                d.setPiece(all[java.util.concurrent.ThreadLocalRandom.current().nextInt(all.length)]);
+                d.setChosen(true);
+                assigned.add(d.uuid());
+            } else {
+                PieceType def = PieceType.parse(raw);
+                d.setPiece(def == null ? PieceType.PAWN : def);
+            }
             markDirty();
         }
         return d;
+    }
+
+    /** True once for players that were just dealt a random piece (used for the welcome message). */
+    public boolean consumeAssigned(UUID id) {
+        return assigned.remove(id);
     }
 
     public PlayerData of(UUID id, String name) {

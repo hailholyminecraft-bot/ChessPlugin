@@ -28,8 +28,9 @@ Local build: `mvn clean verify` (JDK 25) -> `target/ChessSMP-2.2.0.jar`.
 `resourcepack/` (also a build artifact) contains:
 - **Grandmaster Mace**: mace shape with a chess-board head (`chesssmp:grandmaster_mace` item model)
 - **Meteor Remnant** texture (`chesssmp:remnant`)
-- **Green Meteor Trader**: replaces the Nitwit villager outfit with a green robe and hood. The shop villager uses the
-  Nitwit profession, so *every* Nitwit villager looks green while the pack is active.
+- **Glip Glop**: replaces the Nitwit villager look with a green alien (big black eyes, suit). The shop villager uses the
+  Nitwit profession, so *every* Nitwit villager looks like an alien while the pack is active.
+- **King's Decree** sword texture
 
 Zip the *contents* of `resourcepack/` (so `pack.mcmeta` is at the zip root) and set it as `resource-pack` in
 `server.properties` (needs a download URL + SHA-1) or give it to players. Without the pack, set
@@ -49,10 +50,11 @@ Zip the *contents* of `resourcepack/` (so `pack.mcmeta` is at the zip root) and 
 | `/chess trust <player>`, `/chess untrust <player>`, `/chess trust list` | Players you trust are never affected by *your* attacks (melee, projectiles, abilities, freeze, Chess Clock) |
 | `/chess event start [joinSeconds]` / `stop` / `status` / `join` / `leave` | Chess War |
 | `/chess event set <score\|time\|join\|minplayers> <n>`, `/chess event setspawn <white\|black>` | Event settings |
-| `/chess give <player> <item> [amount]` | Items: `trader`, `ability_wand`, `grandmaster_mace`, `chess_grandmaster`, `remnant`, `chess_clock` |
+| `/chess give <player> <item> [amount]` | Items: `trader`, `ability_wand`, `grandmaster_mace`, `chess_grandmaster`, `remnant`, `chess_clock`, `kings_decree` |
 | `/chess announce [-t color] [-s color] [-d seconds] [-chat] <title> \| <subtitle>` | Title on every player's screen |
 | `/chess meteor spawn [random]`, `/chess meteor villager` | Build a meteor site / spawn the shop villager |
 | `/chess admin <setpiece\|reset\|setpoints\|addpoints\|clearcooldowns\|setcooldown\|setduration\|setstat> ...` | Administration |
+| `/chess gui` | Settings menu (admin) |
 | `/chess reload` | Reload `config.yml` |
 
 `/chess announce` examples (MiniMessage works in the text, colors are names or `#RRGGBB`):
@@ -86,6 +88,18 @@ Zip the *contents* of `resourcepack/` (so `pack.mcmeta` is at the zip root) and 
   except you and players you trust. Cooldown 50 s.
 - **Name tags** use scoreboard teams named `csmp_*`; other plugins' teams are left alone (tab list is still updated).
 - **Progression**: Chess Points, ranks (cosmetic titles/kill effects only), objectives, killstreak announcements.
+
+## Newer additions
+- **Random starting piece**: new players are dealt a random piece (`default-piece: RANDOM`). `/chess choose` is off by default
+  (`choose.enabled`); pieces change through the Piece Trader. Optional: a new random piece on every respawn (`random-piece.on-respawn`).
+- **Glip Glop**: the meteor villager, now an alien. He sells maxed *diamond* gear, bows, shields, totems, apples,
+  breeze rods, wind charges and similar. No netherite gear, no mace, no remnants.
+- **`/chess gui`** (admins): switch the shop on/off, turn single shop items on/off (Villager trades button), toggle
+  crafting restrictions, random piece on respawn, event options, sounds and more; number settings with left/right click.
+- **Legendary weapons** (`/chess give <player> kings_decree`): *King's Decree* - Castling (right-click, swap places with the
+  nearest enemy within 12 blocks, only through clear line of sight and onto safe ground, 45 s), Royal Authority (every third
+  hit: Speed I for 2 s), Checkmate (sneak + right-click, 40 s) and King's Protection (below 3 hearts: Castling recharges 15 s
+  faster, once per fight). More weapons of the set are added as their specs arrive. Cooldowns are saved with the player data.
 
 ## Notes and limitations
 - Chess points from a kill are only awarded once per victim per 5 minutes (anti-farming, configurable).

@@ -19,6 +19,7 @@ import com.chesssmp.listeners.PlayerListener;
 import com.chesssmp.listeners.WorldListener;
 import com.chesssmp.scoreboard.NameTagManager;
 import com.chesssmp.statistics.CombatTracker;
+import com.chesssmp.weapons.WeaponManager;
 import com.chesssmp.statistics.ProgressionManager;
 import com.chesssmp.storage.DataStore;
 import com.chesssmp.trader.TraderManager;
@@ -43,6 +44,7 @@ public final class ChessSMP extends JavaPlugin {
     private CustomItems items;
     private GrandmasterManager grandmaster;
     private ClockManager clock;
+    private WeaponManager weapons;
     private MeteorManager meteor;
     private TraderManager trader;
     private EventManager events;
@@ -64,6 +66,7 @@ public final class ChessSMP extends JavaPlugin {
         items = new CustomItems(this);
         grandmaster = new GrandmasterManager(this);
         clock = new ClockManager(this);
+        weapons = new WeaponManager(this);
         meteor = new MeteorManager(this);
         trader = new TraderManager(this);
         events = new EventManager(this);
@@ -151,6 +154,7 @@ public final class ChessSMP extends JavaPlugin {
     public CustomItems items() { return items; }
     public GrandmasterManager grandmaster() { return grandmaster; }
     public ClockManager clock() { return clock; }
+    public WeaponManager weapons() { return weapons; }
     public MeteorManager meteor() { return meteor; }
     public TraderManager trader() { return trader; }
     public EventManager events() { return events; }

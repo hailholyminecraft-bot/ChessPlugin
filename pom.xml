@@ -42,7 +42,6 @@
 
     <build>
         <finalName>ChessSMP-${project.version}</finalName>
-        <!-- FLAT LAYOUT: every file sits next to pom.xml -->
         <sourceDirectory>${project.basedir}</sourceDirectory>
         <resources>
             <resource>

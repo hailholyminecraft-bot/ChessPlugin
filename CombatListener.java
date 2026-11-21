@@ -78,6 +78,22 @@ public final class CombatListener implements Listener {
         plugin.grandmaster().tryFreeze(attacker, victim);
     }
 
+    /** Melee hits with legendary weapons (Royal Authority) and fight tracking (King's Protection). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onWeaponHit(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player attacker && event.getEntity() instanceof org.bukkit.entity.LivingEntity victim) {
+            plugin.weapons().onMeleeHit(attacker, victim);
+            plugin.weapons().onWielderAttacked(attacker);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onWielderDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player victim) {
+            plugin.weapons().onWielderDamaged(victim, event.getFinalDamage());
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim)) {
@@ -145,6 +161,9 @@ public final class CombatListener implements Listener {
         Player p = event.getPlayer();
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (p.isOnline()) {
+                if (plugin.getConfig().getBoolean("random-piece.on-respawn", false)) {
+                    plugin.classes().assignRandom(p, false);
+                }
                 plugin.nameTags().refresh(p);
                 plugin.grandmaster().sync(p);
             }

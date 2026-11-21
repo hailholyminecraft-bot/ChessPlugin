@@ -91,7 +91,7 @@ public final class ShopMenu extends Menu {
                     break;
                 }
                 ConfigurationSection s = offers.getConfigurationSection(id);
-                if (s == null) {
+                if (s == null || !s.getBoolean("enabled", true)) {
                     continue;
                 }
                 ItemStack reward = buildReward(plugin, id, s);

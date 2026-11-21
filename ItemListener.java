@@ -85,6 +85,14 @@ public final class ItemListener implements Listener {
             return;
         }
 
+        if (plugin.weapons().isWeapon(item)) {
+            if (hand == EquipmentSlot.HAND) {
+                event.setCancelled(true);
+                plugin.weapons().onRightClick(p);
+            }
+            return;
+        }
+
         if (plugin.mace().isMace(item)) {
             if (hand != EquipmentSlot.HAND) {
                 return;

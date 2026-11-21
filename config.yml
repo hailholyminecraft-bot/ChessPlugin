@@ -4,7 +4,10 @@
 #  Run /chess reload after editing. Missing keys fall back to the built-in defaults.
 # ============================================================================
 
-default-piece: PAWN        # piece every new player starts with
+default-piece: RANDOM      # RANDOM = every new player is dealt a random piece (or set PAWN, KNIGHT ...)
+
+random-piece:
+  on-respawn: false         # true = every respawn deals a new random piece
 
 storage:
   autosave-minutes: 5
@@ -14,7 +17,7 @@ stats:
 
 # ------------------------------------------------------------------ choosing pieces
 choose:
-  enabled: true
+  enabled: false                # players get a random piece; they can still change it with the Piece Trader
   allowed-during-event: false   # during Chess War pieces can only be changed with the Piece Trader
   cooldown-seconds: 300         # between free /chess choose changes (first choice is free)
   blocked-in-combat: true
@@ -346,20 +349,60 @@ grandmaster-mace:
   dash-min-vertical: 0.2
   dash-cooldown-seconds: 6
   lore:
-    - "<gray>Awarded to the winner of a Chess War."
-    - ""
-    - "<gold>Right-click <gray>while holding: <white>dash forward"
+    - "<gray>Prize for winning a Chess War."
+    - "<gray>Right-click while holding it to dash."
+
+# ------------------------------------------------------------------ legendary weapons
+# Get them with /chess give <player> kings_decree
+weapons:
+  kings_decree:
+    material: NETHERITE_SWORD
+    name: "<gradient:#b388ff:#ffd700><bold>♛ King's Decree"
+    model: "chesssmp:kings_decree"
+    unbreakable: true
+    require-hostile: false      # true = only players you are in combat with can be targeted outside events
+    lore:
+      - "<gold>LEGENDARY"
+      - ""
+      - "<gray>Right-click: <white>Castling <dark_gray>(swap places with the nearest enemy)"
+      - "<gray>Sneak + right-click: <white>Checkmate"
+      - "<gray>Passive: every third hit gives a burst of speed."
+    castling:
+      cooldown: 45
+      radius: 12
+      slowness-level: 1
+      slowness-seconds: 2
+      slow-user: true
+      particle: portal
+      particle-count: 40
+      sound: entity.illusioner.mirror_move
+    royal-authority:
+      hits: 3
+      speed-level: 1
+      speed-seconds: 2
+      reset-seconds: 4
+      particle: crit
+    checkmate:
+      cooldown: 40
+      radius: 30
+      speed-level: 2
+      speed-seconds: 4
+      glowing-seconds: 3
+      particle: crit
+      sound: block.bell.use
+    kings-protection:
+      enabled: true
+      hearts: 3
+      reduce-seconds: 15
 
 # ------------------------------------------------------------------ Piece Trader
 trader:
   material: EMERALD
   display-name: "<green>♟ Piece Trader"
   lore:
-    - "<gray>Right-click to open the trading menu."
-    - "<gray>Change your chess piece, buy combat gear,"
-    - "<gray>consumables and tactical items."
-    - ""
-    - "<dark_gray>Bound to its owner."
+    - "<gray>Right-click to open the shop."
+    - "<gray>Swap your piece or buy gear."
+    - "<dark_gray>Only works for its owner."
   bind-to-owner: true
   allow-drop: false
   confirm-threshold: 10        # trades costing at least this many items ask for confirmation
@@ -422,26 +465,24 @@ items:
     name: "<gradient:#00ffa2:#0a6b4a><bold>Meteor Remnant"
     model: "chesssmp:remnant"
     lore:
-      - "<gray>A shard of the fallen meteor."
-      - "<gray>8 around a <white>Nether Star<gray> forge the"
-      - "<gold>Chess Grandmaster<gray> title."
+      - "<gray>???"
   chess-grandmaster:
     material: NAME_TAG
     name: "<gradient:#ffd700:#ff8c00><bold>♚ Chess Grandmaster"
     model: ""
     lore:
-      - "<gray>Right-click to claim the title."
-      - "<gray>Kill players to collect their pieces."
-      - "<gray>All six pieces: freezing hit, Speed III, Resistance I."
-      - "<red>Dying drops the title and resets your pieces."
+      - "<gray>Right-click to put it on."
+      - "<gray>Kill a player to take their piece."
+      - "<gray>All 6 pieces: speed, resistance and a freezing hit."
+      - "<gray>If you die you drop it and lose the pieces."
   chess-clock:
     material: CLOCK
     name: "<aqua><bold>Chess Clock"
     model: ""
     lore:
-      - "<gray>Right-click: everything within 20 blocks"
-      - "<gray>slows to a crawl. You are not affected."
-      - "<dark_gray>Cooldown: 50 seconds"
+      - "<gray>Right-click to slow down everything within"
+      - "<gray>20 blocks. You are not affected."
+      - "<gray>50 second cooldown."
 
 grandmaster:
   freeze-seconds: 15
@@ -473,60 +514,50 @@ meteor:
   blocks-per-tick: 2000
   core-remnants: 3          # remnants in the barrel inside the meteor
   villager:
-    name: "<green><bold>Meteor Trader"
+    name: "<green><bold>Glip Glop"
   auto-spawn:
     enabled: false          # true = a meteor crashes at a random place every interval
     interval-minutes: 120
     radius: 2000
     world: ""               # empty = main world
   shop:
+    enabled: true
     offers:
-      remnant:
-        type: remnant
-        amount: 1
-        label: Meteor Remnant
-        category: Rare
-        cost: ["NETHERITE_INGOT:6", "DIAMOND_BLOCK:2"]
       chess_clock:
         type: clock
         label: Chess Clock
         category: Tactical
-        cost: ["NETHERITE_INGOT:8", "DIAMOND:16"]
-      netherite_helmet:
-        material: NETHERITE_HELMET
+        cost: ["DIAMOND:24"]
+      diamond_helmet:
+        material: DIAMOND_HELMET
         category: Maxed gear
         enchants: [protection:4, unbreaking:3, mending:1, respiration:3, aqua_affinity:1]
-        cost: ["NETHERITE_INGOT:4", "DIAMOND:8"]
-      netherite_chestplate:
-        material: NETHERITE_CHESTPLATE
+        cost: ["DIAMOND:12"]
+      diamond_chestplate:
+        material: DIAMOND_CHESTPLATE
         category: Maxed gear
         enchants: [protection:4, unbreaking:3, mending:1]
-        cost: ["NETHERITE_INGOT:6", "DIAMOND:12"]
-      netherite_leggings:
-        material: NETHERITE_LEGGINGS
+        cost: ["DIAMOND:20"]
+      diamond_leggings:
+        material: DIAMOND_LEGGINGS
         category: Maxed gear
         enchants: [protection:4, unbreaking:3, mending:1, swift_sneak:3]
-        cost: ["NETHERITE_INGOT:5", "DIAMOND:10"]
-      netherite_boots:
-        material: NETHERITE_BOOTS
+        cost: ["DIAMOND:16"]
+      diamond_boots:
+        material: DIAMOND_BOOTS
         category: Maxed gear
-        enchants: [protection:4, unbreaking:3, mending:1, feather_falling:4, depth_strider:3, soul_speed:3]
-        cost: ["NETHERITE_INGOT:4", "DIAMOND:8"]
-      netherite_sword:
-        material: NETHERITE_SWORD
+        enchants: [protection:4, unbreaking:3, mending:1, feather_falling:4, depth_strider:3]
+        cost: ["DIAMOND:12"]
+      diamond_sword:
+        material: DIAMOND_SWORD
         category: Maxed gear
         enchants: [sharpness:5, unbreaking:3, mending:1, fire_aspect:2, looting:3, sweeping_edge:3]
-        cost: ["NETHERITE_INGOT:5", "DIAMOND:10"]
-      netherite_axe:
-        material: NETHERITE_AXE
+        cost: ["DIAMOND:16"]
+      diamond_axe:
+        material: DIAMOND_AXE
         category: Maxed gear
         enchants: [sharpness:5, unbreaking:3, mending:1, efficiency:5]
-        cost: ["NETHERITE_INGOT:5", "DIAMOND:10"]
-      mace:
-        material: MACE
-        category: Maxed gear
-        enchants: [density:5, wind_burst:3, unbreaking:3, mending:1]
-        cost: ["NETHERITE_INGOT:8", "DIAMOND:16"]
+        cost: ["DIAMOND:16"]
       bow:
         material: BOW
         category: Maxed gear
@@ -546,7 +577,7 @@ meteor:
         material: ELYTRA
         category: Maxed gear
         enchants: [unbreaking:3, mending:1]
-        cost: ["NETHERITE_INGOT:6", "DIAMOND:16"]
+        cost: ["DIAMOND:32"]
       totem:
         material: TOTEM_OF_UNDYING
         category: Consumable
@@ -708,7 +739,6 @@ messages:
   admin-done: "<green>Done."
   help-header: "<dark_gray><strikethrough>     <reset> <gold><bold>ChessSMP <reset><dark_gray><strikethrough>     "
   help-lines:
-    - "<yellow>/chess choose [piece] <gray>- choose your chess piece"
     - "<yellow>/chess ability <1-3> <gray>- use an ability"
     - "<yellow>/chessinfo <gray>- your piece, stats and abilities"
     - "<yellow>/chess trader <gray>- get the Piece Trader"
@@ -719,10 +749,11 @@ messages:
     - "<yellow>/chess event <join|leave|status> <gray>- Chess War"
   help-admin-lines:
     - "<red>/chess event <start|stop|set|setspawn> <gray>- manage Chess War"
-    - "<red>/chess give <player> <item> <gray>- trader, ability_wand, grandmaster_mace, chess_grandmaster, remnant, chess_clock"
+    - "<red>/chess give <player> <item> <gray>- trader, ability_wand, grandmaster_mace, chess_grandmaster, remnant, chess_clock, kings_decree"
     - "<red>/chess announce [-t color] [-s color] [-d sec] <title> | <subtitle> <gray>- screen announcement"
     - "<red>/chess meteor <spawn [random]|villager> <gray>- meteor with the shop villager"
     - "<red>/chess admin ... <gray>- setpiece, reset, setpoints, addpoints, clearcooldowns, setcooldown, setduration, setstat"
+    - "<red>/chess gui <gray>- toggle shop items and settings"
     - "<red>/chess reload"
   # --- pieces
   piece-changed: "<green>You are now a <piece><green>."
@@ -805,7 +836,18 @@ messages:
   meteor-done: "<green>The meteor site is finished."
   meteor-busy: "<red>A meteor is already being built."
   meteor-no-site: "<red>Could not find dry land for a meteor."
-  meteor-villager: "<green>Meteor Trader spawned."
+  weapon-cooldown: "<red><ability> <gray>ready in <white><time>"
+  weapon-no-target: "<red>No valid target nearby."
+  weapon-unsafe: "<red>That swap would not be safe."
+  weapon-cannot-now: "<red>You cannot do that right now."
+  weapon-castled: "<light_purple>Castling: <white>swapped places with <player>"
+  weapon-castled-target: "<light_purple><player> <gray>swapped places with you."
+  weapon-checkmate: "<gold>Checkmate: <white><player> <gold>is marked."
+  weapon-marked: "<red><player> marked you."
+  weapon-protection: "<gold>King's Protection: Castling recharges faster."
+  meteor-villager: "<green>Glip Glop spawned."
+  shop-closed: "<red>Glip Glop has nothing to sell right now."
+  piece-assigned: "<gray>You were dealt the <piece><gray>. You can change it with the Piece Trader."
   # --- Chess War
   event-none: "<red>There is no Chess War right now."
   event-already-running: "<red>A Chess War is already running."
@@ -854,7 +896,7 @@ messages:
   event-sidebar-goal: "<yellow>Goal"
   # --- menus
   gui-trader-title: "<green>♟ Piece Trader"
-  gui-shop-title: "<green>☄ Meteor Trader"
+  gui-shop-title: "<green>☄ Glip Glop"
   gui-choose-title: "<gold>Choose your piece"
   gui-piece-title: "<gold>Change piece"
   gui-confirm-title: "<gold>Confirm purchase"

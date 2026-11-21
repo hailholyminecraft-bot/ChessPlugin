@@ -128,6 +128,21 @@ public final class ClassManager {
      * effects, applies a safety lockout to the new abilities, and refreshes the name tag.
      */
     public void changePiece(Player p, PieceType next) {
+        changePiece(p, next, true);
+    }
+
+    /** Gives the player a random piece that differs from the current one. */
+    public void assignRandom(Player p, boolean applyLockout) {
+        PieceType current = plugin.data().of(p).piece();
+        PieceType[] all = PieceType.values();
+        PieceType next;
+        do {
+            next = all[java.util.concurrent.ThreadLocalRandom.current().nextInt(all.length)];
+        } while (next == current);
+        changePiece(p, next, applyLockout);
+    }
+
+    public void changePiece(Player p, PieceType next, boolean applyLockout) {
         PlayerData d = plugin.data().of(p);
         PieceType old = d.piece();
         plugin.abilities().clear(p);
@@ -138,7 +153,7 @@ public final class ClassManager {
         long now = System.currentTimeMillis();
         d.pruneCooldowns(now);
         long lockout = (long) (plugin.getConfig().getDouble("choose.switch-lockout-seconds", 20) * 1000);
-        if (lockout > 0) {
+        if (applyLockout && lockout > 0) {
             for (int slot = 1; slot <= 3; slot++) {
                 d.extendCooldown(next.key() + "_" + slot, now + lockout);
             }

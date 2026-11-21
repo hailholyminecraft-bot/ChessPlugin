@@ -32,7 +32,14 @@ public final class PlayerListener implements Listener {
         plugin.events().onJoin(p);
         plugin.grandmaster().sync(p);
         plugin.mace().deliverPending(p);
-        if (!d.chosen()) {
+        if (plugin.data().consumeAssigned(p.getUniqueId())) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (p.isOnline()) {
+                    plugin.messages().send(p, "piece-assigned", Messages.comp("piece", plugin.classes().label(d.piece())));
+                }
+            }, 40L);
+        }
+        if (!d.chosen() && plugin.getConfig().getBoolean("choose.enabled", false)) {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (p.isOnline()) {
                     plugin.messages().send(p, "choose-hint");
@@ -74,6 +81,7 @@ public final class PlayerListener implements Listener {
         plugin.clock().forget(id);
         plugin.grandmaster().forget(id);
         plugin.mace().forget(id);
+        plugin.weapons().forget(id);
         plugin.trader().forget(id);
         plugin.combat().clear(id);
         plugin.nameTags().remove(p);

@@ -109,6 +109,6 @@ public final class CustomItems {
     /** True for any ChessSMP item that must never be used as an ordinary crafting ingredient. */
     public boolean isCustom(ItemStack item) {
         return kindOf(item) != null || plugin.mace().isMace(item) || plugin.trader().isTraderItem(item)
-                || plugin.abilityItems().isWand(item);
+                || plugin.abilityItems().isWand(item) || plugin.weapons().isWeapon(item);
     }
 }

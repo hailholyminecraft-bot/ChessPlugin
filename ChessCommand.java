@@ -33,7 +33,7 @@ import java.util.UUID;
 public final class ChessCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> GIVE_ITEMS = List.of("trader", "ability_wand", "grandmaster_mace",
-            "chess_grandmaster", "remnant", "chess_clock");
+            "chess_grandmaster", "remnant", "chess_clock", "kings_decree");
 
     private final ChessSMP plugin;
 
@@ -71,6 +71,16 @@ public final class ChessCommand implements CommandExecutor, TabCompleter {
             case "give" -> give(sender, args);
             case "announce" -> announce(sender, args);
             case "meteor" -> meteor(sender, args);
+            case "gui" -> {
+                if (!requirePerm(sender, "chesssmp.admin")) {
+                    return true;
+                }
+                if (sender instanceof Player p) {
+                    new com.chesssmp.gui.AdminMenu(plugin, p).open();
+                } else {
+                    msg().send(sender, "player-only");
+                }
+            }
             case "reload" -> {
                 if (!sender.hasPermission("chesssmp.admin")) {
                     msg().send(sender, "no-permission");
@@ -451,6 +461,7 @@ public final class ChessCommand implements CommandExecutor, TabCompleter {
             case "chess_grandmaster", "grandmaster", "title" -> plugin.items().create(CustomItems.Kind.TITLE, 1);
             case "remnant", "remnants" -> plugin.items().create(CustomItems.Kind.REMNANT, amount);
             case "chess_clock", "clock" -> plugin.items().create(CustomItems.Kind.CLOCK, 1);
+            case "kings_decree", "king" -> plugin.weapons().create(com.chesssmp.weapons.WeaponManager.KINGS_DECREE);
             default -> null;
         };
         if (stack == null) {
@@ -723,7 +734,7 @@ public final class ChessCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             out.addAll(List.of("help", "choose", "ability", "trader", "wand", "top", "stats", "info", "event", "trust", "untrust"));
             if (sender.hasPermission("chesssmp.admin")) {
-                out.addAll(List.of("give", "announce", "meteor", "reload", "admin"));
+                out.addAll(List.of("give", "announce", "meteor", "reload", "admin", "gui"));
             } else if (sender.hasPermission("chesssmp.announce")) {
                 out.add("announce");
             }
