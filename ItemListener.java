@@ -85,11 +85,19 @@ public final class ItemListener implements Listener {
             return;
         }
 
-        if (plugin.weapons().isWeapon(item)) {
-            if (hand == EquipmentSlot.HAND) {
-                event.setCancelled(true);
-                plugin.weapons().onRightClick(p);
+        if (plugin.weapons().weaponOf(item) != null) {
+            var weapon = plugin.weapons().authorize(p, item);
+            if (weapon == null || (hand == EquipmentSlot.OFF_HAND && !weapon.allowOffhand())) {
+                return;
             }
+            Block clicked = event.getClickedBlock();
+            if (clicked != null && clicked.getType().isInteractable() && !p.isSneaking()) {
+                return; // doors, chests ... work normally
+            }
+            if (weapon.cancelsInteract()) {
+                event.setCancelled(true);
+            }
+            plugin.weapons().use(p, weapon, p.isSneaking());
             return;
         }
 

@@ -31,6 +31,9 @@ public final class PlayerData {
     private long lastChoose;
     private boolean pendingMace;
     private boolean grandmaster;
+    private int pawnKills;
+    private boolean promotionReady;
+    private String promoted;
     private final Set<PieceType> gmPieces = EnumSet.noneOf(PieceType.class);
     private final Set<UUID> trusted = new HashSet<>();
     private final Set<String> objectives = new HashSet<>();
@@ -77,6 +80,13 @@ public final class PlayerData {
     public void setLastChoose(long lastChoose) { this.lastChoose = lastChoose; }
     public boolean pendingMace() { return pendingMace; }
     public void setPendingMace(boolean pendingMace) { this.pendingMace = pendingMace; }
+    public int pawnKills() { return pawnKills; }
+    public void setPawnKills(int pawnKills) { this.pawnKills = pawnKills; }
+    public boolean promotionReady() { return promotionReady; }
+    public void setPromotionReady(boolean promotionReady) { this.promotionReady = promotionReady; }
+    public String promoted() { return promoted; }
+    public void setPromoted(String promoted) { this.promoted = promoted; }
+    public java.util.Map<String, Long> cooldowns() { return java.util.Collections.unmodifiableMap(cooldowns); }
     public boolean grandmaster() { return grandmaster; }
     public void setGrandmaster(boolean grandmaster) { this.grandmaster = grandmaster; }
     public Set<PieceType> gmPieces() { return gmPieces; }
@@ -127,6 +137,9 @@ public final class PlayerData {
         s.set("last-choose", lastChoose);
         s.set("pending-mace", pendingMace);
         s.set("grandmaster", grandmaster);
+        s.set("pawn-kills", pawnKills);
+        s.set("promotion-ready", promotionReady);
+        s.set("promoted", promoted);
         List<String> pieceNames = new ArrayList<>();
         for (PieceType t : gmPieces) {
             pieceNames.add(t.name());
@@ -163,6 +176,9 @@ public final class PlayerData {
         d.lastChoose = s.getLong("last-choose", 0L);
         d.pendingMace = s.getBoolean("pending-mace", false);
         d.grandmaster = s.getBoolean("grandmaster", false);
+        d.pawnKills = s.getInt("pawn-kills", 0);
+        d.promotionReady = s.getBoolean("promotion-ready", false);
+        d.promoted = s.getString("promoted");
         for (String name : s.getStringList("gm-pieces")) {
             PieceType t = PieceType.parse(name);
             if (t != null) {

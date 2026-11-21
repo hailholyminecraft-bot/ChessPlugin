@@ -13,6 +13,10 @@ commands:
     description: Show your chess piece, statistics and abilities
     usage: /<command> [piece|menu]
     aliases: [cinfo]
+  legendary:
+    description: Legendary weapons (list, give, info, cooldowns, promote, reload)
+    usage: /<command> [give|info|cooldowns|promote|reload]
+    aliases: [legend]
 permissions:
   chesssmp.player:
     description: Use classes, abilities, stats and join Chess War events
@@ -26,6 +30,18 @@ permissions:
   chesssmp.announce:
     description: Show title announcements to all players (/chess announce)
     default: op
+  chesssmp.legendary.use:
+    description: Use legendary weapons and see their information
+    default: true
+  chesssmp.legendary.give:
+    description: Give legendary weapons
+    default: op
+  chesssmp.legendary.admin:
+    description: Administer legendary weapons (reload)
+    default: op
+    children:
+      chesssmp.legendary.use: true
+      chesssmp.legendary.give: true
   chesssmp.admin:
     description: Full administrative access to ChessSMP
     default: op
@@ -34,3 +50,4 @@ permissions:
       chesssmp.event: true
       chesssmp.trader: true
       chesssmp.announce: true
+      chesssmp.legendary.admin: true

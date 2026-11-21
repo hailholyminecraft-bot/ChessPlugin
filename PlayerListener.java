@@ -28,6 +28,7 @@ public final class PlayerListener implements Listener {
     /** Shared by the join event and plugin enable (so /reload keeps working). */
     public void handleJoin(Player p) {
         PlayerData d = plugin.data().of(p);
+        d.pruneCooldowns(System.currentTimeMillis());
         plugin.nameTags().refresh(p);
         plugin.events().onJoin(p);
         plugin.grandmaster().sync(p);

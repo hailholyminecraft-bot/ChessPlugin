@@ -33,7 +33,8 @@ import java.util.UUID;
 public final class ChessCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> GIVE_ITEMS = List.of("trader", "ability_wand", "grandmaster_mace",
-            "chess_grandmaster", "remnant", "chess_clock", "kings_decree");
+            "chess_grandmaster", "remnant", "chess_clock", "kings_decree", "queens_gambit",
+            "rooks_fortress", "bishops_judgement", "knights_pursuit", "pawns_sacrifice");
 
     private final ChessSMP plugin;
 
@@ -461,9 +462,12 @@ public final class ChessCommand implements CommandExecutor, TabCompleter {
             case "chess_grandmaster", "grandmaster", "title" -> plugin.items().create(CustomItems.Kind.TITLE, 1);
             case "remnant", "remnants" -> plugin.items().create(CustomItems.Kind.REMNANT, amount);
             case "chess_clock", "clock" -> plugin.items().create(CustomItems.Kind.CLOCK, 1);
-            case "kings_decree", "king" -> plugin.weapons().create(com.chesssmp.weapons.WeaponManager.KINGS_DECREE);
             default -> null;
         };
+        if (stack == null) {
+            com.chesssmp.weapons.LegendaryWeapon lw = plugin.weapons().find(args[2]);
+            stack = lw == null ? null : plugin.weapons().create(lw.id());
+        }
         if (stack == null) {
             msg().send(sender, "give-unknown", Messages.text("items", String.join(", ", GIVE_ITEMS)));
             return;

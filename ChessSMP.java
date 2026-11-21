@@ -10,6 +10,8 @@ import com.chesssmp.meteor.MeteorManager;
 import com.chesssmp.classes.ClassManager;
 import com.chesssmp.commands.ChessCommand;
 import com.chesssmp.commands.ChessInfoCommand;
+import com.chesssmp.commands.LegendaryCommand;
+import com.chesssmp.weapons.WeaponListener;
 import com.chesssmp.events.EventManager;
 import com.chesssmp.events.Relations;
 import com.chesssmp.gui.MenuListener;
@@ -78,10 +80,12 @@ public final class ChessSMP extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new CombatListener(this), this);
         Bukkit.getPluginManager().registerEvents(new ItemListener(this), this);
         Bukkit.getPluginManager().registerEvents(new WorldListener(this), this);
+        Bukkit.getPluginManager().registerEvents(new WeaponListener(this), this);
         Bukkit.getPluginManager().registerEvents(new MenuListener(), this);
 
         bind("chess", new ChessCommand(this));
         bind("chessinfo", new ChessInfoCommand(this));
+        bind("legendary", new LegendaryCommand(this));
 
         nameTags.cleanupStale();
         grandmaster.registerRecipe();
@@ -107,6 +111,9 @@ public final class ChessSMP extends JavaPlugin {
         }
         if (grandmaster != null) {
             grandmaster.unregisterRecipe();
+        }
+        if (weapons != null) {
+            weapons.shutdown();
         }
         if (abilities != null) {
             for (Player p : Bukkit.getOnlinePlayers()) {

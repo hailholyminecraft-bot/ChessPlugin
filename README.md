@@ -30,7 +30,8 @@ Local build: `mvn clean verify` (JDK 25) -> `target/ChessSMP-2.2.0.jar`.
 - **Meteor Remnant** texture (`chesssmp:remnant`)
 - **Glip Glop**: replaces the Nitwit villager look with a green alien (big black eyes, suit). The shop villager uses the
   Nitwit profession, so *every* Nitwit villager looks like an alien while the pack is active.
-- **King's Decree** sword texture
+- **Legendary weapon models**: all six weapons, the Grandmaster Mace and the Remnant are 3D voxel models (each pixel
+  is a cube with a depth, so guards, heads and pommels stick out). `tools/make_weapons.py` regenerates them.
 
 Zip the *contents* of `resourcepack/` (so `pack.mcmeta` is at the zip root) and set it as `resource-pack` in
 `server.properties` (needs a download URL + SHA-1) or give it to players. Without the pack, set
@@ -96,12 +97,33 @@ Zip the *contents* of `resourcepack/` (so `pack.mcmeta` is at the zip root) and 
   breeze rods, wind charges and similar. No netherite gear, no mace, no remnants.
 - **`/chess gui`** (admins): switch the shop on/off, turn single shop items on/off (Villager trades button), toggle
   crafting restrictions, random piece on respawn, event options, sounds and more; number settings with left/right click.
-- **Legendary weapons** (`/chess give <player> kings_decree`): *King's Decree* - Castling (right-click, swap places with the
-  nearest enemy within 12 blocks, only through clear line of sight and onto safe ground, 45 s), Royal Authority (every third
-  hit: Speed I for 2 s), Checkmate (sneak + right-click, 40 s) and King's Protection (below 3 hearts: Castling recharges 15 s
-  faster, once per fight). More weapons of the set are added as their specs arrive. Cooldowns are saved with the player data.
+- **Legendary weapons** (`/legendary`): six chess-themed weapons, all values in `config.yml` (`weapons:`):
+
+| Weapon | Item | Abilities |
+|---|---|---|
+| ♛ King's Decree | Netherite Sword | Castling (right-click, swap with nearest enemy), Royal Authority (every 3rd hit: Speed I), Checkmate (sneak + right-click), King's Protection |
+| ♕ Queen's Gambit | Netherite Sword | Queen's Movement (dash), Diagonal Strike (magic bolt), Royal Pressure |
+| ♜ Rook's Fortress | Shield | Fortress (barrier), Counterattack (on block), Tower's Protection (ally area) |
+| ♝ Bishop's Judgement | Trident | Divine Shot, Diagonal Judgement (piercing), Holy Precision (marked targets) |
+| ♞ Knight's Pursuit | Mace | Knight's Leap, L-Shape Movement, Mounted Combat |
+| ♟ Pawn's Sacrifice | Netherite Axe | Sacrifice (health for damage), Promotion (kill reward), Last Stand |
+
+  Right-click abilities fire on right-click, "sneak" abilities on sneak + right-click. The lore is generated from the
+  config values, so changing a cooldown changes the item text. Cooldowns are saved per player (`/legendary cooldowns`).
+  **Pawn Promotion**: 5 legitimate player kills while you own Pawn's Sacrifice open a menu (`promotion:` in the config)
+  where you trade the axe for Queen's Gambit, Rook's Fortress, Bishop's Judgement or Knight's Pursuit - once per player.
+  Commands: `/legendary`, `/legendary give <player> <weapon>`, `/legendary info <weapon>`, `/legendary cooldowns`,
+  `/legendary promote`, `/legendary reload`. Permissions: `chesssmp.legendary.use` (everyone), `.give` and `.admin` (op).
+  Weapons can be given by id, alias or name: `kings_decree`, `king`, `King's Decree`.
+  **Security**: every weapon item has an id, a unique instance id and a signature made with a secret stored in
+  `plugins/ChessSMP/weapon-secret.key` - renamed or NBT-edited items are just ordinary items. Dropped weapons do not
+  burn or despawn, cannot be used in crafting or the anvil, and the same instance used by two players within 3 seconds
+  is refused and logged (best-effort duplicate detection). Old King's Decree items from before this version are
+  invalid - give them again.
 
 ## Notes and limitations
+- Bishop's Judgement is a trident, but vanilla trident throwing is disabled for it (right-click fires the holy bolt instead).
+- The shield stays functional (right-click still blocks); the Fortress ability fires when you raise it.
 - Chess points from a kill are only awarded once per victim per 5 minutes (anti-farming, configurable).
 - The Grandmaster title is shown in the name tag (prefix + pieces behind the name) - Minecraft cannot render two lines
   above a head with scoreboard teams alone.
