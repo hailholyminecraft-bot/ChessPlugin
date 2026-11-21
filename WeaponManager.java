@@ -1,4 +1,4 @@
-package com.chesssmp.weapons;
+ackage com.chesssmp.weapons;
 
 import com.chesssmp.ChessSMP;
 import com.chesssmp.Fx;
@@ -7,139 +7,385 @@ import com.chesssmp.gui.Items;
 import com.chesssmp.items.CustomItems;
 import com.chesssmp.storage.PlayerData;
 import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Vector;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.logging.Level;
 
 /**
- * Legendary weapons. Identified by a PersistentDataContainer tag, configured in config.yml ("weapons.*").
- * Cooldowns are stored per player (not per item) with the other cooldowns, so they survive relogs, restarts,
- * dropping and re-picking the weapon.
+ * Registry and shared services of the legendary weapons.
  *
- * Implemented: King's Decree. Queen's Gambit and the rest of the set follow.
+ * Security: every weapon item carries its id, a unique instance id and a signature (SHA-256 over a secret that is
+ * generated on the server). Renamed or NBT-edited items without a valid signature are ordinary items.
+ * Cooldowns are saved per player together with the other player data.
  */
 public final class WeaponManager {
 
-    public static final String KINGS_DECREE = "kings_decree";
-    private static final String CD_CASTLING = "kd_castling";
-    private static final String CD_CHECKMATE = "kd_checkmate";
+    private record Mark(UUID owner, long end) { }
+
+    private record Zone(UUID owner, Location center, double radius, long end, double ownerReduction,
+                        double allyReduction) { }
+
+    private record Use(UUID user, long time) { }
+
+    /** Settings of a magic bolt. */
+    public record Bolt(double range, double stepPerTick, double damage, boolean piercing, double falloff,
+                       double hitRadius, String trailA, String trailB, String impactParticle, String impactSound) { }
 
     private final ChessSMP plugin;
-    private final NamespacedKey weaponKey;
-    private final Map<UUID, int[]> hitCounter = new HashMap<>();      // [count]
-    private final Map<UUID, Long> lastHit = new HashMap<>();
-    private final Map<UUID, Long> protectionFightEnd = new HashMap<>();
+    private final Map<String, LegendaryWeapon> weapons = new LinkedHashMap<>();
+    private final NamespacedKey idKey;
+    private final NamespacedKey instanceKey;
+    private final NamespacedKey sigKey;
+    private byte[] secret;
+    private final Map<UUID, Mark> marks = new HashMap<>();
+    private final List<Zone> zones = new ArrayList<>();
+    private final Map<UUID, Use> instanceUse = new HashMap<>();
+    private BukkitTask zoneTask;
+    private boolean suppress;
 
     public WeaponManager(ChessSMP plugin) {
         this.plugin = plugin;
-        this.weaponKey = new NamespacedKey(plugin, "legendary_weapon");
+        this.idKey = new NamespacedKey(plugin, "legendary_weapon");
+        this.instanceKey = new NamespacedKey(plugin, "legendary_instance");
+        this.sigKey = new NamespacedKey(plugin, "legendary_sig");
+        loadSecret();
+        for (LegendaryWeapon w : List.of(new KingsDecree(plugin, this), new QueensGambit(plugin, this),
+                new RooksFortress(plugin, this), new BishopsJudgement(plugin, this),
+                new KnightsPursuit(plugin, this), new PawnsSacrifice(plugin, this))) {
+            weapons.put(w.id(), w);
+        }
     }
 
-    public static Set<String> ids() {
-        return Set.of(KINGS_DECREE);
+    // ------------------------------------------------------------------ registry
+
+    public Collection<LegendaryWeapon> all() {
+        return weapons.values();
     }
 
-    // ------------------------------------------------------------------ item
+    public LegendaryWeapon get(String id) {
+        return weapons.get(id);
+    }
 
-    public ItemStack create(String id) {
-        ConfigurationSection s = plugin.getConfig().getConfigurationSection("weapons." + id);
-        if (s == null || !ids().contains(id)) {
+    private static String normalize(String text) {
+        return text.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+    }
+
+    /** Finds a weapon by id, alias or display name ("kings_decree", "king", "King's Decree"). */
+    public LegendaryWeapon find(String text) {
+        if (text == null || text.isBlank()) {
             return null;
         }
-        Material material = Material.matchMaterial(s.getString("material", "NETHERITE_SWORD"));
-        if (material == null || !material.isItem()) {
-            material = Material.NETHERITE_SWORD;
+        String n = normalize(text);
+        for (LegendaryWeapon w : weapons.values()) {
+            if (normalize(w.id()).equals(n) || normalize(w.alias()).equals(n) || normalize(w.plainName()).equals(n)) {
+                return w;
+            }
         }
-        ItemStack item = new ItemStack(material);
+        return null;
+    }
+
+    // ------------------------------------------------------------------ secret / signature
+
+    private void loadSecret() {
+        Path file = plugin.getDataFolder().toPath().resolve("weapon-secret.key");
+        try {
+            if (Files.exists(file)) {
+                secret = Files.readString(file, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8);
+                if (secret.length >= 32) {
+                    return;
+                }
+            }
+            byte[] raw = new byte[32];
+            new SecureRandom().nextBytes(raw);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : raw) {
+                hex.append(String.format("%02x", b));
+            }
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, hex.toString(), StandardCharsets.UTF_8);
+            secret = hex.toString().getBytes(StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Could not read/write weapon-secret.key - weapons will be invalid after a restart", ex);
+            byte[] raw = new byte[32];
+            new SecureRandom().nextBytes(raw);
+            secret = raw;
+        }
+    }
+
+    private String sign(String id, String instance) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(secret);
+            md.update((id + ":" + instance).getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            byte[] digest = md.digest();
+            for (int i = 0; i < 12; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    // ------------------------------------------------------------------ items
+
+    public ItemStack create(String id) {
+        LegendaryWeapon w = weapons.get(id);
+        if (w == null) {
+            return null;
+        }
+        ItemStack item = new ItemStack(w.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Items.noItalic(plugin.messages().mm(s.getString("name", id))));
-        List<Component> lore = new ArrayList<>();
-        for (String line : s.getStringList("lore")) {
-            lore.add(Items.noItalic(plugin.messages().mm(line)));
-        }
-        meta.lore(lore);
-        meta.setUnbreakable(s.getBoolean("unbreakable", true));
+        meta.displayName(Items.noItalic(plugin.messages().mm(w.rawName())));
+        meta.lore(lore(w));
+        meta.setUnbreakable(plugin.getConfig().getBoolean("weapons." + id + ".unbreakable", true));
         meta.setEnchantmentGlintOverride(true);
-        CustomItems.applyModel(plugin, meta, s.getString("model", ""));
-        meta.getPersistentDataContainer().set(weaponKey, PersistentDataType.STRING, id);
+        CustomItems.applyModel(plugin, meta, plugin.getConfig().getString("weapons." + id + ".model", "chesssmp:" + id));
+        String instance = UUID.randomUUID().toString();
+        meta.getPersistentDataContainer().set(idKey, PersistentDataType.STRING, id);
+        meta.getPersistentDataContainer().set(instanceKey, PersistentDataType.STRING, instance);
+        meta.getPersistentDataContainer().set(sigKey, PersistentDataType.STRING, sign(id, instance));
         item.setItemMeta(meta);
         return item;
     }
 
-    public String idOf(ItemStack item) {
+    public List<Component> lore(LegendaryWeapon w) {
+        List<String> raw = plugin.getConfig().getStringList("weapons." + w.id() + ".lore");
+        if (raw.isEmpty()) {
+            raw = new ArrayList<>();
+            raw.add("<gold><bold>LEGENDARY</bold> <dark_gray>\u2022 <gray>" + w.typeName());
+            raw.add("<dark_gray>" + w.playstyle());
+            raw.add("");
+            raw.addAll(w.abilityLore());
+            raw.add("<dark_gray><italic>A legendary weapon of the ChessSMP.");
+        }
+        List<Component> out = new ArrayList<>();
+        for (String line : raw) {
+            out.add(Items.noItalic(plugin.messages().mm(line)));
+        }
+        return out;
+    }
+
+    /** The weapon an item really is (valid signature), or null for ordinary / forged items. */
+    public LegendaryWeapon weaponOf(ItemStack item) {
         if (item == null || !item.hasItemMeta()) {
             return null;
         }
-        return item.getItemMeta().getPersistentDataContainer().get(weaponKey, PersistentDataType.STRING);
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        String id = pdc.get(idKey, PersistentDataType.STRING);
+        String instance = pdc.get(instanceKey, PersistentDataType.STRING);
+        String sig = pdc.get(sigKey, PersistentDataType.STRING);
+        if (id == null || instance == null || sig == null || !sig.equals(sign(id, instance))) {
+            return null;
+        }
+        return weapons.get(id);
     }
 
     public boolean isWeapon(ItemStack item) {
-        return idOf(item) != null;
+        return weaponOf(item) != null;
     }
 
-    private boolean holding(Player p, String id) {
-        return id.equals(idOf(p.getInventory().getItemInMainHand()));
+    /** Weapon in the main hand (passives). */
+    public LegendaryWeapon held(Player p) {
+        return weaponOf(p.getInventory().getItemInMainHand());
     }
 
-    // ------------------------------------------------------------------ helpers
-
-    private ConfigurationSection cfg(String path) {
-        return plugin.getConfig().getConfigurationSection("weapons." + KINGS_DECREE + "." + path);
+    /**
+     * Like {@link #weaponOf} but also records the use. Two different players using the very same weapon instance
+     * within three seconds means the item was duplicated - the use is refused and logged.
+     */
+    public LegendaryWeapon authorize(Player p, ItemStack item) {
+        LegendaryWeapon w = weaponOf(item);
+        if (w == null || !p.hasPermission("chesssmp.legendary.use")) {
+            return null;
+        }
+        UUID instance;
+        try {
+            instance = UUID.fromString(item.getItemMeta().getPersistentDataContainer().get(instanceKey, PersistentDataType.STRING));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        Use previous = instanceUse.get(instance);
+        if (previous != null && !previous.user().equals(p.getUniqueId()) && now - previous.time() < 3000) {
+            plugin.getLogger().warning("Duplicated legendary weapon detected: " + w.id() + " used by " + p.getName()
+                    + " and another player within 3 seconds (instance " + instance + ")");
+            return null;
+        }
+        instanceUse.put(instance, new Use(p.getUniqueId(), now));
+        if (instanceUse.size() > 500) {
+            instanceUse.values().removeIf(u -> now - u.time() > 60_000);
+        }
+        return w;
     }
 
-    private double num(String path, String key, double def) {
-        ConfigurationSection s = cfg(path);
-        return s == null ? def : s.getDouble(key, def);
+    // ------------------------------------------------------------------ event entry points
+
+    public void use(Player p, LegendaryWeapon w, boolean sneaking) {
+        try {
+            w.onRightClick(p, sneaking);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Legendary weapon " + w.id() + " failed for " + p.getName(), ex);
+            plugin.messages().actionBar(p, "ability-error");
+        }
     }
 
-    /** A player the wielder may target: alive, in the same world, not trusted, not a teammate, visible. */
-    private boolean validTarget(Player user, Player other, double radius) {
-        if (other.equals(user) || other.isDead() || !other.isOnline()) {
+    public boolean suppressed() {
+        return suppress;
+    }
+
+    public void onKill(Player killer, Player victim) {
+        for (LegendaryWeapon w : weapons.values()) {
+            try {
+                w.onKill(killer, victim);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(Level.SEVERE, "Legendary weapon " + w.id() + " failed on kill", ex);
+            }
+        }
+    }
+
+    public void beforeHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent e) {
+        LegendaryWeapon w = held(attacker);
+        if (w != null) {
+            w.beforeHit(attacker, victim, e);
+        }
+    }
+
+    public void afterHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent e) {
+        LegendaryWeapon w = held(attacker);
+        if (w != null) {
+            w.afterHit(attacker, victim, e);
+        }
+    }
+
+    public void damaged(Player victim, EntityDamageEvent e) {
+        LegendaryWeapon main = held(victim);
+        LegendaryWeapon off = weaponOf(victim.getInventory().getItemInOffHand());
+        if (main != null) {
+            main.onDamaged(victim, e);
+        }
+        if (off != null && off != main) {
+            off.onDamaged(victim, e);
+        }
+    }
+
+    public void forget(UUID id) {
+        for (LegendaryWeapon w : weapons.values()) {
+            w.forget(id);
+        }
+        marks.remove(id);
+        zones.removeIf(z -> z.owner().equals(id));
+    }
+
+    public void shutdown() {
+        if (zoneTask != null) {
+            zoneTask.cancel();
+            zoneTask = null;
+        }
+        zones.clear();
+        marks.clear();
+    }
+
+    // ------------------------------------------------------------------ cooldowns (persisted in PlayerData)
+
+    private String cdKey(LegendaryWeapon w, String ability) {
+        return "w_" + w.id() + "_" + ability;
+    }
+
+    public long remaining(Player p, LegendaryWeapon w, String ability) {
+        return Math.max(0, plugin.data().of(p).cooldownEnd(cdKey(w, ability)) - System.currentTimeMillis());
+    }
+
+    /** Checks the cooldown; tells the player and returns false while it runs. */
+    public boolean ready(Player p, LegendaryWeapon w, String ability, String name) {
+        long remain = remaining(p, w, ability);
+        if (remain > 0) {
+            plugin.messages().actionBar(p, "weapon-cooldown", Messages.text("ability", name),
+                    Messages.text("time", Messages.duration(remain)));
+            return false;
+        }
+        return true;
+    }
+
+    public void start(Player p, LegendaryWeapon w, String ability, double seconds) {
+        plugin.data().of(p).setCooldown(cdKey(w, ability), System.currentTimeMillis() + (long) (seconds * 1000));
+        plugin.data().markDirty();
+    }
+
+    public void reduce(Player p, LegendaryWeapon w, String ability, long millis) {
+        PlayerData d = plugin.data().of(p);
+        long now = System.currentTimeMillis();
+        long end = d.cooldownEnd(cdKey(w, ability));
+        if (end > now) {
+            d.setCooldown(cdKey(w, ability), Math.max(now, end - millis));
+            plugin.data().markDirty();
+        }
+    }
+
+    // ------------------------------------------------------------------ targets and safety
+
+    /** May {@code owner} harm / target {@code other}? (not trusted, not a teammate, alive, survival-like) */
+    public boolean canTarget(Player owner, Player other) {
+        if (other.equals(owner) || other.isDead() || !other.isOnline()) {
             return false;
         }
         GameMode mode = other.getGameMode();
         if (mode == GameMode.SPECTATOR || mode == GameMode.CREATIVE) {
             return false;
         }
-        if (!other.getWorld().equals(user.getWorld()) || other.getLocation().distanceSquared(user.getLocation()) > radius * radius) {
-            return false;
-        }
-        if (plugin.data().of(user).trusted().contains(other.getUniqueId()) || plugin.events().sameSide(user, other)) {
-            return false;
-        }
-        if (plugin.getConfig().getBoolean("weapons." + KINGS_DECREE + ".require-hostile", false)
-                && !plugin.relations().isEnemy(user, other)) {
-            return false;
-        }
-        return user.hasLineOfSight(other); // never through walls
+        return !plugin.data().of(owner).trusted().contains(other.getUniqueId()) && !plugin.events().sameSide(owner, other);
     }
 
-    private Player nearestEnemy(Player user, double radius) {
+    public Player nearestEnemy(Player user, double radius, boolean lineOfSight) {
         Player best = null;
         double bestDist = Double.MAX_VALUE;
         for (Player other : user.getWorld().getNearbyPlayers(user.getLocation(), radius)) {
-            if (!validTarget(user, other, radius)) {
+            if (!canTarget(user, other) || (lineOfSight && !user.hasLineOfSight(other))) {
                 continue;
             }
             double d = other.getLocation().distanceSquared(user.getLocation());
-            if (d < bestDist) {
+            if (d <= radius * radius && d < bestDist) {
                 bestDist = d;
                 best = other;
             }
@@ -156,16 +402,14 @@ public final class WeaponManager {
     }
 
     /** Feet and head free, no hazard, and solid ground within four blocks below (no void, no lava). */
-    static boolean isSafe(Location loc) {
-        if (loc.getWorld() == null) {
+    public boolean isSafe(Location loc) {
+        World world = loc.getWorld();
+        if (world == null || loc.getBlockY() <= world.getMinHeight() + 1) {
             return false;
         }
         Block feet = loc.getBlock();
         Block head = feet.getRelative(0, 1, 0);
-        if (loc.getBlockY() <= loc.getWorld().getMinHeight() + 1 || dangerous(feet.getType()) || dangerous(head.getType())) {
-            return false;
-        }
-        if (!feet.isPassable() || !head.isPassable()) {
+        if (dangerous(feet.getType()) || dangerous(head.getType()) || !feet.isPassable() || !head.isPassable()) {
             return false;
         }
         for (int i = 1; i <= 4; i++) {
@@ -180,191 +424,254 @@ public final class WeaponManager {
         return false;
     }
 
-    private long remaining(PlayerData d, String cooldownId) {
-        return Math.max(0, d.cooldownEnd(cooldownId) - System.currentTimeMillis());
+    /** True when nothing solid lies between the two points (checked at foot and eye height). */
+    public boolean pathClear(Location from, Location to) {
+        if (from.getWorld() == null || !from.getWorld().equals(to.getWorld())) {
+            return false;
+        }
+        Vector delta = to.toVector().subtract(from.toVector());
+        double length = delta.length();
+        if (length < 0.01) {
+            return true;
+        }
+        Vector dir = delta.clone().normalize();
+        for (double h : new double[]{0.3, 1.5}) {
+            Location start = from.clone().add(0, h, 0);
+            if (from.getWorld().rayTraceBlocks(start, dir, length, FluidCollisionMode.NEVER, true) != null) {
+                return false;
+            }
+        }
+        return true;
     }
 
-    private void applyCooldown(PlayerData d, String cooldownId, double seconds) {
-        d.setCooldown(cooldownId, System.currentTimeMillis() + (long) (seconds * 1000));
-        plugin.data().markDirty();
-    }
-
-    private void effect(Player p, PotionEffectType type, int level, double seconds) {
+    public void effect(Player p, PotionEffectType type, int level, double seconds) {
         if (level > 0 && seconds > 0) {
             plugin.abilities().applyEffect(p, type, level, (int) (seconds * 20));
         }
     }
 
-    // ------------------------------------------------------------------ right-click entry point
+    // ------------------------------------------------------------------ marks (Bishop)
 
-    /** Called for a right-click with a legendary weapon in the main hand. */
-    public void onRightClick(Player p) {
-        String id = idOf(p.getInventory().getItemInMainHand());
-        if (!KINGS_DECREE.equals(id) || !p.hasPermission("chesssmp.player")) {
-            return;
+    public void mark(LivingEntity victim, Player owner, double seconds) {
+        marks.put(victim.getUniqueId(), new Mark(owner.getUniqueId(), System.currentTimeMillis() + (long) (seconds * 1000)));
+    }
+
+    public boolean markedBy(LivingEntity victim, Player owner) {
+        Mark m = marks.get(victim.getUniqueId());
+        if (m == null) {
+            return false;
         }
-        if (p.isSneaking()) {
-            checkmate(p);
-        } else {
-            castling(p);
+        if (m.end() < System.currentTimeMillis()) {
+            marks.remove(victim.getUniqueId());
+            return false;
+        }
+        return m.owner().equals(owner.getUniqueId());
+    }
+
+    // ------------------------------------------------------------------ protective zones (Rook)
+
+    /** Creates a non-solid protective area (never traps anybody). One zone per owner and kind. */
+    public void addZone(Player owner, double radius, double seconds, double ownerReduction, double allyReduction) {
+        zones.removeIf(z -> z.owner().equals(owner.getUniqueId()) && (z.allyReduction() > 0) == (allyReduction > 0));
+        zones.add(new Zone(owner.getUniqueId(), owner.getLocation().clone(), radius,
+                System.currentTimeMillis() + (long) (seconds * 1000), ownerReduction, allyReduction));
+        if (zoneTask == null) {
+            zoneTask = new BukkitRunnable() {
+                int tick;
+
+                @Override
+                public void run() {
+                    long now = System.currentTimeMillis();
+                    zones.removeIf(z -> z.end() < now);
+                    if (zones.isEmpty()) {
+                        cancel();
+                        zoneTask = null;
+                        return;
+                    }
+                    tick++;
+                    for (Zone z : zones) {
+                        ring(z, tick % 2 == 0 ? "end_rod" : "wax_on");
+                    }
+                }
+            }.runTaskTimer(plugin, 4L, 4L);
         }
     }
 
-    // ------------------------------------------------------------------ King's Decree
-
-    private void castling(Player p) {
-        PlayerData d = plugin.data().of(p);
-        long remain = remaining(d, CD_CASTLING);
-        if (remain > 0) {
-            plugin.messages().actionBar(p, "weapon-cooldown", Messages.text("ability", "Castling"),
-                    Messages.text("time", Messages.duration(remain)));
-            return;
+    private void ring(Zone z, String particle) {
+        int points = Math.max(16, (int) (z.radius() * 8));
+        for (int i = 0; i < points; i++) {
+            double angle = 2 * Math.PI * i / points;
+            Location at = z.center().clone().add(Math.cos(angle) * z.radius(), 0.15, Math.sin(angle) * z.radius());
+            Fx.particle(plugin, at, particle, 1, 0.0);
+            if (i % 4 == 0) {
+                Fx.particle(plugin, at.clone().add(0, 1.2, 0), particle, 1, 0.0);
+            }
         }
-        if (p.isInsideVehicle() || p.isGliding() || p.isDead()) {
-            plugin.messages().actionBar(p, "weapon-cannot-now");
-            return;
-        }
-        double radius = num("castling", "radius", 12);
-        Player target = nearestEnemy(p, radius);
-        if (target == null) {
-            plugin.messages().actionBar(p, "weapon-no-target");
-            return;
-        }
-        Location mine = p.getLocation();
-        Location theirs = target.getLocation();
-        // Both destinations must be safe before anybody moves.
-        if (target.isInsideVehicle() || !isSafe(theirs) || !isSafe(mine)) {
-            plugin.messages().actionBar(p, "weapon-unsafe");
-            return;
-        }
-        Location toUser = theirs.clone();
-        toUser.setYaw(mine.getYaw());
-        toUser.setPitch(mine.getPitch());
-        Location toTarget = mine.clone();
-        toTarget.setYaw(theirs.getYaw());
-        toTarget.setPitch(theirs.getPitch());
-
-        applyCooldown(d, CD_CASTLING, num("castling", "cooldown", 45));
-        String particle = cfg("castling").getString("particle", "portal");
-        int count = cfg("castling").getInt("particle-count", 40);
-        Fx.particle(plugin, mine.clone().add(0, 1, 0), particle, count, 0.5);
-        Fx.particle(plugin, theirs.clone().add(0, 1, 0), particle, count, 0.5);
-
-        p.teleport(toUser);
-        target.teleport(toTarget);
-
-        String sound = cfg("castling").getString("sound", "entity.illusioner.mirror_move");
-        Fx.sound(plugin, toUser, sound, 1f, 1f);
-        Fx.sound(plugin, toTarget, sound, 1f, 1f);
-        int level = (int) num("castling", "slowness-level", 1);
-        double seconds = num("castling", "slowness-seconds", 2);
-        effect(target, PotionEffectType.SLOWNESS, level, seconds);
-        if (cfg("castling").getBoolean("slow-user", true)) {
-            effect(p, PotionEffectType.SLOWNESS, level, seconds);
-        }
-        plugin.combat().tag(p.getUniqueId(), target.getUniqueId());
-        plugin.messages().actionBar(p, "weapon-castled", Messages.text("player", target.getName()));
-        plugin.messages().actionBar(target, "weapon-castled-target", Messages.text("player", p.getName()));
     }
 
-    private void checkmate(Player p) {
-        PlayerData d = plugin.data().of(p);
-        long remain = remaining(d, CD_CHECKMATE);
-        if (remain > 0) {
-            plugin.messages().actionBar(p, "weapon-cooldown", Messages.text("ability", "Checkmate"),
-                    Messages.text("time", Messages.duration(remain)));
-            return;
+    /** Damage multiplier of the protective zones the victim is standing in (1 = none). */
+    public double zoneMultiplier(Player victim) {
+        if (zones.isEmpty()) {
+            return 1.0;
         }
-        Player target = nearestEnemy(p, num("checkmate", "radius", 30));
-        if (target == null) {
-            plugin.messages().actionBar(p, "weapon-no-target");
-            return;
-        }
-        applyCooldown(d, CD_CHECKMATE, num("checkmate", "cooldown", 40));
-        effect(p, PotionEffectType.SPEED, (int) num("checkmate", "speed-level", 2), num("checkmate", "speed-seconds", 4));
-        effect(target, PotionEffectType.GLOWING, 1, num("checkmate", "glowing-seconds", 3));
-        Fx.particle(plugin, target.getLocation().add(0, 2.2, 0), cfg("checkmate").getString("particle", "crit"), 20, 0.3);
-        Fx.sound(plugin, p.getLocation(), cfg("checkmate").getString("sound", "block.bell.use"), 1f, 0.8f);
-        plugin.combat().tag(p.getUniqueId(), target.getUniqueId());
-        plugin.messages().actionBar(p, "weapon-checkmate", Messages.text("player", target.getName()));
-        plugin.messages().actionBar(target, "weapon-marked", Messages.text("player", p.getName()));
-    }
-
-    /** Royal Authority: every third consecutive hit grants a short Speed I. */
-    public void onMeleeHit(Player attacker, LivingEntity victim) {
-        if (!holding(attacker, KINGS_DECREE)) {
-            return;
-        }
-        ConfigurationSection s = cfg("royal-authority");
-        if (s == null) {
-            return;
-        }
-        UUID id = attacker.getUniqueId();
         long now = System.currentTimeMillis();
-        Long last = lastHit.get(id);
-        if (last != null && now - last > (long) (s.getDouble("reset-seconds", 4) * 1000)) {
-            hitCounter.remove(id);
+        double mult = 1.0;
+        for (Zone z : zones) {
+            if (z.end() < now || !z.center().getWorld().equals(victim.getWorld())
+                    || z.center().distanceSquared(victim.getLocation()) > z.radius() * z.radius()) {
+                continue;
+            }
+            if (z.owner().equals(victim.getUniqueId())) {
+                mult = Math.min(mult, 1.0 - z.ownerReduction());
+            } else if (z.allyReduction() > 0) {
+                Player owner = Bukkit.getPlayer(z.owner());
+                if (owner != null && plugin.relations().isTeammate(owner, victim)) {
+                    mult = Math.min(mult, 1.0 - z.allyReduction());
+                }
+            }
         }
-        lastHit.put(id, now);
-        int[] counter = hitCounter.computeIfAbsent(id, k -> new int[1]);
-        counter[0]++;
-        if (counter[0] >= Math.max(1, s.getInt("hits", 3))) {
-            counter[0] = 0;
-            effect(attacker, PotionEffectType.SPEED, s.getInt("speed-level", 1), s.getDouble("speed-seconds", 2));
-            Fx.particle(plugin, attacker.getLocation().add(0, 1, 0), s.getString("particle", "crit"), 10, 0.4);
+        return mult;
+    }
+
+    // ------------------------------------------------------------------ magic bolts (Queen, Bishop)
+
+    private boolean boltTarget(Player owner, LivingEntity e) {
+        if (e.equals(owner) || e.isDead() || e instanceof ArmorStand || plugin.meteor().isShopVillager(e)) {
+            return false;
         }
+        return !(e instanceof Player other) || canTarget(owner, other);
     }
 
     /**
-     * King's Protection: when the wielder drops below 3 hearts, Castling's cooldown is reduced once per fight.
-     * A fight lasts until nobody has been in combat with the wielder for the combat-tag time.
+     * Fires a bolt that flies in a straight line, stops at solid blocks and damages what it hits.
+     *
+     * @param adjust optional damage adjustment per target (e.g. Holy Precision bonus)
+     * @param after  optional callback for every target that was hit
      */
-    public void onWielderDamaged(Player victim, double finalDamage) {
-        ConfigurationSection s = cfg("kings-protection");
-        if (s == null || !s.getBoolean("enabled", true) || !holding(victim, KINGS_DECREE)) {
-            return;
-        }
-        UUID id = victim.getUniqueId();
-        long now = System.currentTimeMillis();
-        long fightLength = plugin.getConfig().getLong("combat.tag-seconds", 20) * 1000L;
-        Long end = protectionFightEnd.get(id);
-        boolean sameFight = end != null && end > now;
-        if (sameFight) {
-            protectionFightEnd.put(id, now + fightLength); // fight goes on
-            return;
-        }
-        double threshold = s.getDouble("hearts", 3) * 2.0;
-        if (victim.getHealth() - finalDamage >= threshold) {
-            return;
-        }
-        protectionFightEnd.put(id, now + fightLength);
-        PlayerData d = plugin.data().of(victim);
-        long reduceMs = (long) (s.getDouble("reduce-seconds", 15) * 1000);
-        long cdEnd = d.cooldownEnd(CD_CASTLING);
-        if (cdEnd > now) {
-            d.setCooldown(CD_CASTLING, Math.max(now, cdEnd - reduceMs));
-            plugin.data().markDirty();
-            plugin.messages().actionBar(victim, "weapon-protection");
-            Fx.sound(plugin, victim.getLocation(), "block.beacon.power_select", 1f, 1.4f);
-        }
+    public void fireBolt(Player owner, Bolt spec, BiFunction<LivingEntity, Double, Double> adjust, Consumer<LivingEntity> after) {
+        Vector dir = owner.getEyeLocation().getDirection().normalize();
+        Location start = owner.getEyeLocation().add(dir.clone().multiply(0.6));
+        new BukkitRunnable() {
+            final Location pos = start.clone();
+            final Set<UUID> hit = new HashSet<>();
+            double travelled;
+            int hits;
+
+            private void impact(Location at) {
+                Fx.particle(plugin, at, spec.impactParticle(), 25, 0.4);
+                Fx.sound(plugin, at, spec.impactSound(), 1f, 1.2f);
+            }
+
+            @Override
+            public void run() {
+                int substeps = 3;
+                double step = spec.stepPerTick() / substeps;
+                for (int i = 0; i < substeps; i++) {
+                    if (!owner.isOnline() || travelled >= spec.range()) {
+                        cancel();
+                        return;
+                    }
+                    pos.add(dir.clone().multiply(step));
+                    travelled += step;
+                    if (!pos.getBlock().isPassable()) {
+                        impact(pos);
+                        cancel();
+                        return;
+                    }
+                    Fx.particle(plugin, pos, spec.trailA(), 1, 0.05);
+                    Fx.particle(plugin, pos, spec.trailB(), 1, 0.08);
+                    for (Entity e : pos.getWorld().getNearbyEntities(pos, spec.hitRadius(), spec.hitRadius(), spec.hitRadius())) {
+                        if (!(e instanceof LivingEntity target) || hit.contains(target.getUniqueId()) || !boltTarget(owner, target)) {
+                            continue;
+                        }
+                        double damage = spec.damage() * Math.max(0.1, 1.0 - spec.falloff() * hits);
+                        if (adjust != null) {
+                            damage = adjust.apply(target, damage);
+                        }
+                        suppress = true;
+                        try {
+                            target.damage(damage, owner);
+                        } finally {
+                            suppress = false;
+                        }
+                        hit.add(target.getUniqueId());
+                        hits++;
+                        if (after != null) {
+                            after.accept(target);
+                        }
+                        impact(target.getLocation().add(0, 1, 0));
+                        if (!spec.piercing()) {
+                            cancel();
+                            return;
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    /** Keeps an ongoing fight alive when the wielder deals damage. */
-    public void onWielderAttacked(Player attacker) {
-        Long end = protectionFightEnd.get(attacker.getUniqueId());
-        if (end != null && end > System.currentTimeMillis()) {
-            protectionFightEnd.put(attacker.getUniqueId(),
-                    System.currentTimeMillis() + plugin.getConfig().getLong("combat.tag-seconds", 20) * 1000L);
+    // ------------------------------------------------------------------ promotion (Pawn's Sacrifice)
+
+    public boolean ownsPawn(Player p) {
+        for (ItemStack it : p.getInventory().getContents()) {
+            if (weaponOf(it) instanceof PawnsSacrifice) {
+                return true;
+            }
         }
+        return false;
     }
 
-    public void forget(UUID id) {
-        hitCounter.remove(id);
-        lastHit.remove(id);
-        protectionFightEnd.remove(id);
+    public List<String> promotionChoices() {
+        List<String> ids = new ArrayList<>();
+        for (String raw : plugin.getConfig().getStringList("promotion.choices")) {
+            LegendaryWeapon w = find(raw);
+            if (w != null && !(w instanceof PawnsSacrifice) && !ids.contains(w.id())) {
+                ids.add(w.id());
+            }
+        }
+        if (ids.isEmpty()) {
+            ids.addAll(List.of("queens_gambit", "rooks_fortress", "bishops_judgement", "knights_pursuit"));
+        }
+        return ids;
     }
 
-    public static String normalize(String text) {
-        return text.toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+    /** Replaces one Pawn's Sacrifice in the inventory with the chosen weapon. */
+    public boolean promote(Player p, String weaponId) {
+        PlayerData d = plugin.data().of(p);
+        if (!d.promotionReady()) {
+            plugin.messages().send(p, "promo-not-ready");
+            return false;
+        }
+        if (d.promoted() != null && !plugin.getConfig().getBoolean("promotion.allow-repeat", false)) {
+            plugin.messages().send(p, "promo-already");
+            return false;
+        }
+        if (!promotionChoices().contains(weaponId)) {
+            return false;
+        }
+        int slot = -1;
+        for (int i = 0; i < p.getInventory().getSize(); i++) {
+            if (weaponOf(p.getInventory().getItem(i)) instanceof PawnsSacrifice) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            plugin.messages().send(p, "promo-no-axe");
+            return false;
+        }
+        ItemStack reward = create(weaponId);
+        p.getInventory().setItem(slot, reward);
+        d.setPromoted(weaponId);
+        d.setPromotionReady(false);
+        d.setPawnKills(0);
+        plugin.data().markDirty();
+        LegendaryWeapon w = weapons.get(weaponId);
+        plugin.messages().send(p, "promo-done", Messages.text("weapon", w.plainName()));
+        Bukkit.broadcast(plugin.messages().component("promo-broadcast", Messages.text("player", p.getName()),
+                Messages.text("weapon", w.plainName())));
+        Fx.particle(plugin, p.getLocation().add(0, 1, 0), "totem_of_undying", 60, 0.7);
+        Fx.sound(plugin, p.getLocation(), "ui.toast.challenge_complete", 1f, 1f);
+        return true;
     }
 }
